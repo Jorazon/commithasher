@@ -20,7 +20,7 @@ generate_trailing_data() {
 braille_chars=("⠇" "⠋" "⠙" "⠸" "⠴" "⠦")
 i=0
 
-echo -ne "  Finding a cool hash for you\r"
+echo -ne "  Finding a cool hash\r"
 
 while true; do
   # Update status indicator
@@ -37,7 +37,7 @@ while true; do
   git commit --amend -m "$NEW_MESSAGE" --no-edit > /dev/null 2>&1
 
   # Get short hash of modified commit
-  HASH=$(git log -1 --pretty=format:"%h")
+  HASH=$(git log -1 --pretty=format:"%H")
 
   # Check if the hash matches the required pattern
   if [[ "$HASH" == $TARGET* ]]; then
