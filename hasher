@@ -16,22 +16,31 @@ generate_trailing_data() {
   echo "$TRAILING"
 }
 
-# Get the tree object for the current staged state
+# Get the needed info for the current staged state
 TREE=$(git write-tree)
+AUTHOR_DATE=$(git log -1 --format=%aI)
+COMMITTER_DATE=$(git log -1 --format=%cI)
 
 while true; do
   # Generate trailing characters
   TRAILING_DATA=$(generate_trailing_data)
 
+  NEW_MESSAGE="$MESSAGE #$TRAILING_DATA"
+
   # Attempt to create a new commit with git commit-tree
-  HASH=$(echo "$MESSAGE $TRAILING_DATA" | git commit-tree "$TREE" -p HEAD -m "$MESSAGE $TRAILING_DATA")
+  HASH=$(GIT_AUTHOR_DATE="$AUTHOR_DATE" GIT_COMMITTER_DATE="$COMMITTER_DATE" \
+          git commit-tree "$TREE" -p HEAD -m "$NEW_MESSAGE")
+
+  # Print
+  echo -ne "\t$HASH    \r"
 
   # Check if the hash matches the required pattern
   if [[ "$HASH" == $TARGET* ]]; then
-    echo "Found matching hash: $HASH"
+         #9b080422609459edb0dfaec29f3e5de7eada1832
+    echo "Found matching hash: $HASH            "
     echo "Amending commit with #$TRAILING_DATA"
     # Amend the actual commit to set the final message with the matching hash
-    git commit --amend -m "$MESSAGE #$TRAILING_DATA" --no-edit > /dev/null 2>&1
+    git commit --amend -m "$NEW_MESSAGE" --no-edit > /dev/null 2>&1
     break
   fi
 done
