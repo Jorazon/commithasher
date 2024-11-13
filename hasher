@@ -4,7 +4,7 @@ TARGET="000" # The target pattern (3 leading zeros)
 MESSAGE=$(git log -1 --pretty=format:"%s") # original commit message
 COUNT=1
 
-# ASCII characters set: 0-9, A-Z, a-z
+# ASCII characters set: 0-9, A-F
 CHARS=({0..9} {A..F})
 
 # Function to generate random trailing data
@@ -16,31 +16,33 @@ generate_trailing_data() {
   echo "$TRAILING"
 }
 
-# Get the needed info for the current staged state
-TREE=$(git write-tree)
-AUTHOR_DATE=$(git log -1 --format=%aI)
-COMMITTER_DATE=$(git log -1 --format=%cI)
+# Setup for braille status indicator
+braille_chars=("⠇" "⠋" "⠙" "⠸" "⠴" "⠦")
+i=0
+
+echo -ne "  Finding a cool hash for you\r"
 
 while true; do
+  # Update status indicator
+  echo -ne "${braille_chars[$((i % ${#braille_chars[@]}))]}\r"
+  ((i++))
+
   # Generate trailing characters
   TRAILING_DATA=$(generate_trailing_data)
 
+  # New commit message
   NEW_MESSAGE="$MESSAGE #$TRAILING_DATA"
 
-  # Attempt to create a new commit with git commit-tree
-  HASH=$(GIT_AUTHOR_DATE="$AUTHOR_DATE" GIT_COMMITTER_DATE="$COMMITTER_DATE" \
-          git commit-tree "$TREE" -p HEAD -m "$NEW_MESSAGE")
+  # Amend commit
+  git commit --amend -m "$NEW_MESSAGE" --no-edit > /dev/null 2>&1
 
-  # Print
-  echo -ne "\t$HASH    \r"
+  # Get short hash of modified commit
+  HASH=$(git log -1 --pretty=format:"%h")
 
   # Check if the hash matches the required pattern
   if [[ "$HASH" == $TARGET* ]]; then
-         #9b080422609459edb0dfaec29f3e5de7eada1832
-    echo "Found matching hash: $HASH            "
+    echo "Found matching hash: $HASH"
     echo "Amending commit with #$TRAILING_DATA"
-    # Amend the actual commit to set the final message with the matching hash
-    git commit --amend -m "$NEW_MESSAGE" --no-edit > /dev/null 2>&1
     break
   fi
 done
