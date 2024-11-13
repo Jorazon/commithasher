@@ -5,7 +5,7 @@ MESSAGE=$(git log -1 --pretty=format:"%s") # original commit message
 COUNT=1
 
 # ASCII characters set: 0-9, A-Z, a-z
-CHARS=({0..9} {A..Z})
+CHARS=({0..9} {A..F})
 
 # Function to generate random trailing data
 generate_trailing_data() {
@@ -16,19 +16,22 @@ generate_trailing_data() {
   echo "$TRAILING"
 }
 
+# Get the tree object for the current staged state
+TREE=$(git write-tree)
+
 while true; do
   # Generate trailing characters
   TRAILING_DATA=$(generate_trailing_data)
 
-  # Amend the commit with additional trailing data
-  git commit --amend -m "$MESSAGE #$TRAILING_DATA" --no-edit > /dev/null 2>&1
-
-  # Get the new hash
-  HASH=$(git log -1 --pretty=format:"%h")
+  # Attempt to create a new commit with git commit-tree
+  HASH=$(echo "$MESSAGE $TRAILING_DATA" | git commit-tree "$TREE" -p HEAD -m "$MESSAGE $TRAILING_DATA")
 
   # Check if the hash matches the required pattern
   if [[ "$HASH" == $TARGET* ]]; then
     echo "Found matching hash: $HASH"
+    echo "Amending commit with #$TRAILING_DATA"
+    # Amend the actual commit to set the final message with the matching hash
+    git commit --amend -m "$MESSAGE #$TRAILING_DATA" --no-edit > /dev/null 2>&1
     break
   fi
 done
