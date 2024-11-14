@@ -1,8 +1,11 @@
 #!/bin/bash
 
 TARGET="000" # The target pattern (3 leading zeros)
-MESSAGE=$(git log -1 --pretty=format:"%s") # original commit message
-COUNT=1
+# Retrieve the original message, timestamps and tree object from the HEAD commit
+MESSAGE=$(git log -1 --pretty=format:"%s")
+AUTHOR_DATE=$(git log -1 --format=%aI)
+COMMITTER_DATE=$(git log -1 --format=%cI)
+TREE=$(git write-tree)
 
 # ASCII characters set: 0-9, A-F
 CHARS=({0..9} {A..F})
@@ -33,14 +36,14 @@ while true; do
   # New commit message
   NEW_MESSAGE="$MESSAGE #$TRAILING_DATA"
 
-  # Amend commit
-  git commit --amend -m "$NEW_MESSAGE" --no-edit > /dev/null 2>&1
-
-  # Get short hash of modified commit
-  HASH=$(git log -1 --pretty=format:"%H")
+  # Create a new commit with `git commit-tree`
+  HASH=$(GIT_AUTHOR_DATE="$AUTHOR_DATE" GIT_COMMITTER_DATE="$COMMITTER_DATE" \
+    git commit-tree "$TREE" -p HEAD~1 -m "$NEW_MESSAGE")
 
   # Check if the hash matches the required pattern
   if [[ "$HASH" == $TARGET* ]]; then
+    # Replace previous HEAD with new commit
+    git reset --soft "$HASH"
     echo "Found matching hash: $HASH"
     echo "Amending commit with #$TRAILING_DATA"
     break
