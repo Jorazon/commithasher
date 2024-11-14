@@ -11,7 +11,7 @@ TREE=$(git write-tree)
 CHARS=({0..9} {A..F})
 
 # Function to generate random trailing data
-generate_trailing_data() {
+function generate_trailing_data() {
   TRAILING=""
   for i in {1..6}; do  # Length of trailing data, adjust as needed
     TRAILING+="${CHARS[RANDOM % ${#CHARS[@]}]}"
@@ -19,17 +19,27 @@ generate_trailing_data() {
   echo "$TRAILING"
 }
 
-# Setup for braille status indicator
-braille_chars=("⠇" "⠋" "⠙" "⠸" "⠴" "⠦")
-i=0
+function status_spinner() {
+  # Setup for braille status indicator
+  braille_chars=("⠇" "⠋" "⠙" "⠸" "⠴" "⠦")
+  fps=15
+  delay=$(echo "scale=6; 1.0 / $fps.0" | bc)
+  i=0
+  # Update status indicator
+  while true; do
+    echo -ne "${braille_chars[$((i % ${#braille_chars[@]}))]}\r"
+    ((i++))
+    sleep $delay
+  done
+}
 
 echo -ne "  Finding a cool hash\r"
 
-while true; do
-  # Update status indicator
-  echo -ne "${braille_chars[$((i % ${#braille_chars[@]}))]}\r"
-  ((i++))
+# Run spinner indicator in parallel and store it's PID
+status_spinner &
+PID1=$!
 
+while true; do
   # Generate trailing characters
   TRAILING_DATA=$(generate_trailing_data)
 
@@ -42,8 +52,13 @@ while true; do
 
   # Check if the hash matches the required pattern
   if [[ "$HASH" == $TARGET* ]]; then
+    # Kill spinner indicator
+    kill $PID1
+
     # Replace previous HEAD with new commit
     git reset --soft "$HASH"
+
+    # Print info
     echo "Found matching hash: $HASH"
     echo "Amending commit with #$TRAILING_DATA"
     break
