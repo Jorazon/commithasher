@@ -1,5 +1,20 @@
 #!/bin/bash
 
+function hide_cursor() {
+  printf '\033[?25l'
+}
+
+function show_cursor() {
+  printf '\033[?25h'
+}
+
+function handle_int() {
+  show_cursor
+  exit 0
+}
+
+trap "handle_int" SIGINT
+
 TARGET="000" # The target pattern (3 leading zeros)
 # Retrieve the original message, timestamps and tree object from the HEAD commit
 MESSAGE=$(git log -1 --pretty=format:"%s")
@@ -17,11 +32,12 @@ CHARS=('2000' '2001' '2002' '2003' '2004' '2005' '2006' '2007' \
 # Function to generate random trailing data
 function generate_trailing_data() {
   TRAILING=""
-  for i in {1..6}; do  # Length of trailing data, adjust as needed
+  for i in {1..8}; do  # Length of trailing data, adjust as needed
     INDEX=$(( RANDOM % ${#CHARS[@]} ))
     TRAILING="${TRAILING}$(printf "\u${CHARS[$INDEX]}")"
   done
   echo "$TRAILING"
+  return 0
 }
 
 function status_spinner() {
@@ -39,7 +55,7 @@ function status_spinner() {
 }
 
 # hide cursor
-printf '\033[?25l'
+hide_cursor
 
 echo -ne "  Finding a cool hash\r"
 
@@ -47,12 +63,16 @@ echo -ne "  Finding a cool hash\r"
 status_spinner &
 PID1=$!
 
+NEW_MESSAGE=""
+
 while true; do
   # Generate trailing characters
-  TRAILING_DATA=$(generate_trailing_data)
-
-  # New commit message
-  NEW_MESSAGE="$MESSAGE $TRAILING_DATA"
+  if TRAILING_DATA=$(generate_trailing_data); then
+    # New commit message
+    NEW_MESSAGE="$MESSAGE $TRAILING_DATA"
+  else
+    break
+  fi
 
   # Create a new commit with `git commit-tree`
   HASH=$(GIT_AUTHOR_DATE="$AUTHOR_DATE" GIT_COMMITTER_DATE="$COMMITTER_DATE" \
@@ -63,9 +83,6 @@ while true; do
     # Kill spinner indicator
     kill $PID1
 
-    # show cursor
-    printf '\033[?25h'
-
     # Replace previous HEAD with new commit
     git reset --soft "$HASH"
 
@@ -75,3 +92,6 @@ while true; do
     break
   fi
 done
+
+# show cursor
+show_cursor
