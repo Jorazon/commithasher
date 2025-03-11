@@ -8,13 +8,18 @@ COMMITTER_DATE=$(git log -1 --format=%cI)
 TREE=$(git write-tree)
 
 # ASCII characters set: 0-9, A-F
-CHARS=({0..9} {A..F})
+#CHARS=({0..9} {A..F})
+
+# invisible unicode characters
+CHARS=('2000' '2001' '2002' '2003' '2004' '2005' '2006' '2007' \
+'2008' '2009' '200A' '200B' '200C' '200D' '200E' '200F' '202F')
 
 # Function to generate random trailing data
 function generate_trailing_data() {
   TRAILING=""
   for i in {1..6}; do  # Length of trailing data, adjust as needed
-    TRAILING+="${CHARS[RANDOM % ${#CHARS[@]}]}"
+    INDEX=$(( RANDOM % ${#CHARS[@]} ))
+    TRAILING="${TRAILING}$(printf "\u${CHARS[$INDEX]}")"
   done
   echo "$TRAILING"
 }
@@ -33,6 +38,9 @@ function status_spinner() {
   done
 }
 
+# hide cursor
+printf '\033[?25l'
+
 echo -ne "  Finding a cool hash\r"
 
 # Run spinner indicator in parallel and store it's PID
@@ -44,7 +52,7 @@ while true; do
   TRAILING_DATA=$(generate_trailing_data)
 
   # New commit message
-  NEW_MESSAGE="$MESSAGE #$TRAILING_DATA"
+  NEW_MESSAGE="$MESSAGE $TRAILING_DATA"
 
   # Create a new commit with `git commit-tree`
   HASH=$(GIT_AUTHOR_DATE="$AUTHOR_DATE" GIT_COMMITTER_DATE="$COMMITTER_DATE" \
@@ -55,12 +63,15 @@ while true; do
     # Kill spinner indicator
     kill $PID1
 
+    # show cursor
+    printf '\033[?25h'
+
     # Replace previous HEAD with new commit
     git reset --soft "$HASH"
 
     # Print info
     echo "Found matching hash: $HASH"
-    echo "Amending commit with #$TRAILING_DATA"
+    #echo "Amending commit with #$TRAILING_DATA"
     break
   fi
 done
