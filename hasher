@@ -15,7 +15,16 @@ function handle_int() {
 
 trap "handle_int" SIGINT
 
-TARGET="000" # The target pattern (3 leading zeros)
+TARGET="000" # The default target pattern (3 leading zeros)
+# If argument is passed, override only if it's valid hex
+if [[ -n "$1" ]] && [[ "$1" =~ ^[0-9a-f]+$ ]]; then
+  HEX_INPUT="$1"
+elif [[ -n "$1" ]]; then
+  echo "Error: '$1' contains invalid hexadecimal characters." >&2
+  echo "       Only 0-9 and a-f (case-sensitive) are allowed." >&2
+  exit 1
+fi
+
 # Retrieve the original message, timestamps and tree object from the HEAD commit
 MESSAGE=$(git log -1 --pretty=format:"%s")
 AUTHOR_DATE=$(git log -1 --format=%aI)
