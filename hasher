@@ -15,6 +15,10 @@ function handle_int() {
 
 trap "handle_int" SIGINT
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HELPER_SOURCE="$SCRIPT_DIR/hasher-helper.c"
+HELPER_BINARY="$SCRIPT_DIR/hasher-helper"
+
 TARGET="000" # The default target pattern (3 leading zeros)
 
 for arg in "$@"; do
@@ -36,20 +40,6 @@ if ! MESSAGE=$(git log -1 --format=%B) ||
   echo "Error: failed to read commit metadata. Is HEAD a non-root commit?" >&2
   exit 1
 fi
-
-# ASCII characters set: 0-9, a-f
-CHARS=({0..9} {a..f})
-
-# Function to generate random nonce data for the custom commit header
-function generate_nonce() {
-  NONCE=""
-  for i in {1..16}; do  # Length of nonce data, adjust as needed
-    INDEX=$(( RANDOM % ${#CHARS[@]} ))
-    NONCE="${NONCE}${CHARS[$INDEX]}"
-  done
-  echo "$NONCE"
-  return 0
-}
 
 function print_commit() {
   local nonce="$1"
@@ -79,6 +69,15 @@ function create_commit() {
   fi
 }
 
+function ensure_helper() {
+  if [[ ! -x "$HELPER_BINARY" || "$HELPER_SOURCE" -nt "$HELPER_BINARY" ]]; then
+    if ! gcc -O3 -std=c11 -Wall -Wextra -o "$HELPER_BINARY" "$HELPER_SOURCE"; then
+      echo "Error: failed to build $HELPER_BINARY" >&2
+      exit 1
+    fi
+  fi
+}
+
 function status_spinner() {
   # Setup for braille status indicator
   braille_chars=("⠇" "⠋" "⠙" "⠸" "⠴" "⠦")
@@ -92,6 +91,8 @@ function status_spinner() {
   done
 }
 
+ensure_helper
+
 # hide cursor
 hide_cursor
 
@@ -101,45 +102,41 @@ echo -ne "  Finding a cool hash\r"
 status_spinner &
 PID1=$!
 
-NONCE=""
-ATTEMPTS=0
-START_TIME_MS=$(date +%s%3N)
+HELPER_OUTPUT=$(print_commit "0000000000000000" | "$HELPER_BINARY" "$TARGET")
+HELPER_STATUS=$?
 
-while true; do
-  # Generate nonce header value
-  if NONCE=$(generate_nonce); then
-    HASH=$(create_commit "$NONCE" 0)
-    ((ATTEMPTS++))
-  else
-    break
-  fi
+# Kill spinner indicator
+kill $PID1
 
-  # Check if the hash matches the required pattern
-  if [[ "$HASH" == $TARGET* ]]; then
-    # Kill spinner indicator
-    kill $PID1
+if [[ "$HELPER_STATUS" -ne 0 ]]; then
+  show_cursor
+  exit "$HELPER_STATUS"
+fi
 
-    HASH=$(create_commit "$NONCE" 1)
+read -r NONCE HASH ATTEMPTS ELAPSED_MS <<< "$HELPER_OUTPUT"
+WRITTEN_HASH=$(create_commit "$NONCE" 1)
 
-    # Replace previous HEAD with new commit
-    git reset --soft "$HASH"
+if [[ "$WRITTEN_HASH" != "$HASH" ]]; then
+  show_cursor
+  echo "Error: helper hash $HASH did not match written commit $WRITTEN_HASH" >&2
+  exit 1
+fi
 
-    # Print info
-    ELAPSED_MS=$(($(date +%s%3N) - START_TIME_MS))
-    RATE_MS=$ELAPSED_MS
-    if [[ "$RATE_MS" -lt 1 ]]; then
-      RATE_MS=1
-    fi
-    HASHRATE=$((ATTEMPTS * 1000 / RATE_MS))
+# Replace previous HEAD with new commit
+git reset --soft "$HASH"
 
-    echo "Found matching hash: $HASH"
-    echo "Amended commit with header $NONCE"
-    #echo "Tested hashes: $ATTEMPTS"
-    #printf 'Duration: %d.%03ds\n' "$((ELAPSED_MS / 1000))" "$((ELAPSED_MS % 1000))"
-    echo "Hashrate: ${HASHRATE} H/s"
-    break
-  fi
-done
+RATE_MS=$ELAPSED_MS
+if [[ "$RATE_MS" -lt 1 ]]; then
+  RATE_MS=1
+fi
+HASHRATE=$((ATTEMPTS * 1000 / RATE_MS))
+
+# Print info
+echo "Found matching hash: $HASH"
+echo "Amended commit with header $NONCE"
+echo "Tested hashes: $ATTEMPTS"
+printf 'Duration: %d.%03ds\n' "$((ELAPSED_MS / 1000))" "$((ELAPSED_MS % 1000))"
+echo "Hashrate: ${HASHRATE} H/s"
 
 # show cursor
 show_cursor
