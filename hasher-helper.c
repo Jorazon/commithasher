@@ -1,4 +1,9 @@
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 199309L
+#endif
+
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,11 +11,23 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <pthread.h>
 #include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
 #endif
 
 #define NONCE_LEN 16
 #define PROGRESS_INTERVAL_ATTEMPTS 65536
+#define MAX_THREADS 256
+
+#ifdef _WIN32
+typedef HANDLE Thread;
+#define THREAD_RETURN DWORD WINAPI
+#else
+typedef pthread_t Thread;
+#define THREAD_RETURN void *
+#endif
 
 typedef struct {
   uint32_t h[5];
@@ -18,6 +35,21 @@ typedef struct {
   unsigned char block[64];
   size_t block_len;
 } Sha1;
+
+typedef struct {
+  const char *target;
+  const unsigned char *base_content;
+  size_t content_size;
+  size_t nonce_offset;
+  const unsigned char *object_header;
+  size_t object_header_len;
+  int thread_index;
+  int thread_count;
+  atomic_int *found;
+  atomic_uint_fast64_t *attempts;
+  unsigned char *result_nonce;
+  char *result_hash;
+} Worker;
 
 static uint32_t rol32(uint32_t value, unsigned int bits) {
   return (value << bits) | (value >> (32 - bits));
@@ -180,10 +212,10 @@ static void print_progress(uint64_t attempts, long long elapsed_ms) {
     rate_ms = 1;
   }
 
-  fprintf(stderr, "\rTested hashes: %llu | Duration: %lld.%03llds | Hashrate: %llu H/s",
+  fprintf(stderr, "\rTested hashes: %llu | Duration: %lldm%llds | Hashrate: %llu H/s",
           (unsigned long long)attempts,
-          elapsed_ms / 1000,
-          elapsed_ms % 1000,
+          elapsed_ms / (1000 * 60),
+          (elapsed_ms / 1000) % 60,
           (unsigned long long)(attempts * 1000 / rate_ms));
   fflush(stderr);
 }
@@ -260,6 +292,139 @@ static long long now_ms(void) {
 #endif
 }
 
+static int cpu_count(void) {
+#ifdef _WIN32
+  DWORD count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+  return count > 0 ? (int)count : 1;
+#else
+  long count = sysconf(_SC_NPROCESSORS_ONLN);
+  return count > 0 ? (int)count : 1;
+#endif
+}
+
+static int thread_count(void) {
+  const char *override = getenv("HASHER_THREADS");
+  if (override && *override) {
+    char *end = NULL;
+    long value = strtol(override, &end, 10);
+    if (end && *end == '\0' && value > 0 && value <= MAX_THREADS) {
+      return (int)value;
+    }
+  }
+
+  int count = cpu_count();
+  if (count < 1) {
+    return 1;
+  }
+  if (count > MAX_THREADS) {
+    return MAX_THREADS;
+  }
+  return count;
+}
+
+static uint64_t total_attempts(const atomic_uint_fast64_t *attempts, int count) {
+  uint64_t total = 0;
+  for (int i = 0; i < count; i++) {
+    total += atomic_load_explicit(&attempts[i], memory_order_relaxed);
+  }
+  return total;
+}
+
+static THREAD_RETURN worker_main(void *raw_worker) {
+  Worker *worker = (Worker *)raw_worker;
+  unsigned char *content = malloc(worker->content_size);
+  if (!content) {
+    int expected = 0;
+    if (atomic_compare_exchange_strong_explicit(worker->found, &expected, 1,
+                                                memory_order_relaxed,
+                                                memory_order_relaxed)) {
+      worker->result_hash[0] = '\0';
+    }
+#ifdef _WIN32
+    return 1;
+#else
+    return NULL;
+#endif
+  }
+
+  memcpy(content, worker->base_content, worker->content_size);
+  unsigned char *nonce = content + worker->nonce_offset;
+  uint64_t local_attempts = 0;
+
+  for (uint64_t counter = (uint64_t)worker->thread_index;
+       !atomic_load_explicit(worker->found, memory_order_relaxed);
+       counter += (uint64_t)worker->thread_count) {
+    unsigned char digest[20];
+    Sha1 sha1;
+
+    format_nonce(counter, nonce);
+
+    sha1_init(&sha1);
+    sha1_update(&sha1, worker->object_header, worker->object_header_len);
+    sha1_update(&sha1, content, worker->content_size);
+    sha1_final(&sha1, digest);
+
+    local_attempts++;
+
+    if ((local_attempts & (PROGRESS_INTERVAL_ATTEMPTS - 1)) == 0) {
+      atomic_store_explicit(&worker->attempts[worker->thread_index], local_attempts,
+                            memory_order_relaxed);
+    }
+
+    if (hash_matches(digest, worker->target)) {
+      int expected = 0;
+      if (atomic_compare_exchange_strong_explicit(worker->found, &expected, 1,
+                                                  memory_order_relaxed,
+                                                  memory_order_relaxed)) {
+        hash_to_hex(digest, worker->result_hash);
+        memcpy(worker->result_nonce, nonce, NONCE_LEN);
+        atomic_store_explicit(&worker->attempts[worker->thread_index], local_attempts,
+                              memory_order_relaxed);
+      }
+      break;
+    }
+  }
+
+  atomic_store_explicit(&worker->attempts[worker->thread_index], local_attempts,
+                        memory_order_relaxed);
+  free(content);
+
+#ifdef _WIN32
+  return 0;
+#else
+  return NULL;
+#endif
+}
+
+static int start_thread(Thread *thread, Worker *worker) {
+#ifdef _WIN32
+  *thread = CreateThread(NULL, 0, worker_main, worker, 0, NULL);
+  return *thread != NULL;
+#else
+  return pthread_create(thread, NULL, worker_main, worker) == 0;
+#endif
+}
+
+static void join_thread(Thread thread) {
+#ifdef _WIN32
+  WaitForSingleObject(thread, INFINITE);
+  CloseHandle(thread);
+#else
+  pthread_join(thread, NULL);
+#endif
+}
+
+static void sleep_100ms(void) {
+#ifdef _WIN32
+  Sleep(100);
+#else
+  struct timespec ts;
+  ts.tv_sec = 0;
+  ts.tv_nsec = 100000000;
+  nanosleep(&ts, NULL);
+#endif
+}
+
 int main(int argc, char **argv) {
   if (argc != 2 || !is_hex_prefix(argv[1])) {
     fprintf(stderr, "usage: hasher-helper <lowercase-hex-prefix>\n");
@@ -288,44 +453,94 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  uint64_t attempts = 0;
+  int threads_count = thread_count();
+  Thread *threads = calloc((size_t)threads_count, sizeof(Thread));
+  Worker *workers = calloc((size_t)threads_count, sizeof(Worker));
+  atomic_uint_fast64_t *attempts = calloc((size_t)threads_count, sizeof(atomic_uint_fast64_t));
+  unsigned char result_nonce[NONCE_LEN];
+  char result_hash[41] = {0};
+  atomic_int found;
+
+  if (!threads || !workers || !attempts) {
+    fprintf(stderr, "hasher-helper: failed to allocate worker state\n");
+    free(threads);
+    free(workers);
+    free(attempts);
+    free(content);
+    return 1;
+  }
+
   long long start_ms = now_ms();
   long long last_report_ms = start_ms;
   int printed_progress = 0;
+  atomic_init(&found, 0);
 
-  for (uint64_t counter = 0;; counter++) {
-    unsigned char digest[20];
-    Sha1 sha1;
+  for (int i = 0; i < threads_count; i++) {
+    atomic_init(&attempts[i], 0);
+    workers[i].target = argv[1];
+    workers[i].base_content = content;
+    workers[i].content_size = content_size;
+    workers[i].nonce_offset = (size_t)(nonce - content);
+    workers[i].object_header = (const unsigned char *)object_header;
+    workers[i].object_header_len = (size_t)object_header_len + 1;
+    workers[i].thread_index = i;
+    workers[i].thread_count = threads_count;
+    workers[i].found = &found;
+    workers[i].attempts = attempts;
+    workers[i].result_nonce = result_nonce;
+    workers[i].result_hash = result_hash;
 
-    format_nonce(counter, nonce);
-
-    sha1_init(&sha1);
-    sha1_update(&sha1, (const unsigned char *)object_header, (size_t)object_header_len + 1);
-    sha1_update(&sha1, content, content_size);
-    sha1_final(&sha1, digest);
-
-    attempts++;
-
-    if ((attempts & (PROGRESS_INTERVAL_ATTEMPTS - 1)) == 0) {
-      long long current_ms = now_ms();
-      if (current_ms - last_report_ms >= 1000) {
-        print_progress(attempts, current_ms - start_ms);
-        last_report_ms = current_ms;
-        printed_progress = 1;
+    if (!start_thread(&threads[i], &workers[i])) {
+      fprintf(stderr, "hasher-helper: failed to start worker thread\n");
+      atomic_store_explicit(&found, 1, memory_order_relaxed);
+      for (int j = 0; j < i; j++) {
+        join_thread(threads[j]);
       }
-    }
-
-    if (hash_matches(digest, argv[1])) {
-      char hash[41];
-      long long elapsed_ms = now_ms() - start_ms;
-      if (printed_progress) {
-        fputc('\n', stderr);
-      }
-      hash_to_hex(digest, hash);
-      printf("%.*s %s %llu %lld\n", NONCE_LEN, nonce, hash,
-             (unsigned long long)attempts, elapsed_ms);
+      free(threads);
+      free(workers);
+      free(attempts);
       free(content);
-      return 0;
+      return 1;
     }
   }
+
+  while (!atomic_load_explicit(&found, memory_order_relaxed)) {
+    sleep_100ms();
+
+    long long current_ms = now_ms();
+    if (current_ms - last_report_ms >= 1000) {
+      print_progress(total_attempts(attempts, threads_count), current_ms - start_ms);
+      last_report_ms = current_ms;
+      printed_progress = 1;
+    }
+  }
+
+  for (int i = 0; i < threads_count; i++) {
+    join_thread(threads[i]);
+  }
+
+  long long elapsed_ms = now_ms() - start_ms;
+  uint64_t final_attempts = total_attempts(attempts, threads_count);
+
+  if (printed_progress) {
+    fputc('\n', stderr);
+  }
+
+  if (result_hash[0] == '\0') {
+    fprintf(stderr, "hasher-helper: worker failed\n");
+    free(threads);
+    free(workers);
+    free(attempts);
+    free(content);
+    return 1;
+  }
+
+  printf("%.*s %s %llu %lld\n", NONCE_LEN, result_nonce, result_hash,
+         (unsigned long long)final_attempts, elapsed_ms);
+
+  free(threads);
+  free(workers);
+  free(attempts);
+  free(content);
+  return 0;
 }
