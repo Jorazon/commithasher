@@ -51,18 +51,27 @@ function generate_nonce() {
   return 0
 }
 
-function create_commit() {
+function print_commit() {
   local nonce="$1"
 
-  {
-    printf 'tree %s\n' "$TREE"
-    printf 'parent %s\n' "$PARENT"
-    printf 'author %s\n' "$AUTHOR_IDENTITY"
-    printf 'committer %s\n' "$COMMITTER_IDENTITY"
-    printf 'nonce %s\n' "$nonce"
-    printf '\n'
-    printf '%s' "$MESSAGE"
-  } | git hash-object -t commit -w --stdin
+  printf 'tree %s\n' "$TREE"
+  printf 'parent %s\n' "$PARENT"
+  printf 'author %s\n' "$AUTHOR_IDENTITY"
+  printf 'committer %s\n' "$COMMITTER_IDENTITY"
+  printf 'nonce %s\n' "$nonce"
+  printf '\n'
+  printf '%s' "$MESSAGE"
+}
+
+function create_commit() {
+  local nonce="$1"
+  local write="$2"
+
+  if [[ "$write" -eq 1 ]]; then
+    print_commit "$nonce" | git hash-object -t commit -w --stdin
+  else
+    print_commit "$nonce" | git hash-object -t commit --stdin
+  fi
 }
 
 function status_spinner() {
@@ -92,7 +101,7 @@ NONCE=""
 while true; do
   # Generate nonce header value
   if NONCE=$(generate_nonce); then
-    HASH=$(create_commit "$NONCE")
+    HASH=$(create_commit "$NONCE" 0)
   else
     break
   fi
@@ -101,6 +110,8 @@ while true; do
   if [[ "$HASH" == $TARGET* ]]; then
     # Kill spinner indicator
     kill $PID1
+
+    HASH=$(create_commit "$NONCE" 1)
 
     # Replace previous HEAD with new commit
     git reset --soft "$HASH"
