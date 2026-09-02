@@ -103,17 +103,10 @@ ensure_helper
 # hide cursor
 hide_cursor
 
-echo -ne "  Finding a cool hash\r"
-
-# Run spinner indicator in parallel and store it's PID
-status_spinner &
-PID1=$!
+echo "Finding a cool hash"
 
 HELPER_OUTPUT=$(print_commit "0000000000000000" | "$HELPER_BINARY" "$TARGET")
 HELPER_STATUS=$?
-
-# Kill spinner indicator
-kill $PID1
 
 if [[ "$HELPER_STATUS" -ne 0 ]]; then
   show_cursor
