@@ -70,7 +70,12 @@ function create_commit() {
   if [[ "$write" -eq 1 ]]; then
     print_commit "$nonce" | git hash-object -t commit -w --stdin
   else
-    print_commit "$nonce" | git hash-object -t commit --stdin
+    #print_commit "$nonce" | git hash-object -t commit --stdin
+    CONTENT_SIZE=$(print_commit "$nonce" | wc -c)
+    {
+      printf 'commit %s\0' "$CONTENT_SIZE"
+      print_commit "$nonce"
+    } | sha1sum | cut -d ' ' -f 1
   fi
 }
 
