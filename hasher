@@ -10,6 +10,7 @@ function show_cursor() {
 
 function handle_int() {
   show_cursor
+  printf '\n'
   exit 0
 }
 
@@ -20,9 +21,11 @@ HELPER_SOURCE="$SCRIPT_DIR/hasher-helper.c"
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     HELPER_BINARY="$SCRIPT_DIR/hasher-helper.exe"
+    HELPER_THREAD_FLAGS=()
     ;;
   *)
     HELPER_BINARY="$SCRIPT_DIR/hasher-helper"
+    HELPER_THREAD_FLAGS=(-pthread)
     ;;
 esac
 
@@ -78,7 +81,7 @@ function create_commit() {
 
 function ensure_helper() {
   if [[ ! -x "$HELPER_BINARY" || "$HELPER_SOURCE" -nt "$HELPER_BINARY" ]]; then
-    if ! gcc -O3 -std=c11 -Wall -Wextra -o "$HELPER_BINARY" "$HELPER_SOURCE"; then
+    if ! gcc -O3 -std=c11 -Wall -Wextra "${HELPER_THREAD_FLAGS[@]}" -o "$HELPER_BINARY" "$HELPER_SOURCE"; then
       echo "Error: failed to build $HELPER_BINARY" >&2
       exit 1
     fi
@@ -135,7 +138,7 @@ HASHRATE=$((ATTEMPTS * 1000 / RATE_MS))
 echo "Found matching hash: $HASH"
 echo "Amended commit with header $NONCE"
 echo "Tested hashes: $ATTEMPTS"
-printf 'Duration: %d.%03ds\n' "$((ELAPSED_MS / 1000))" "$((ELAPSED_MS % 1000))"
+printf 'Duration: %dm%d.%03ds\n' "$((ELAPSED_MS / 60000))" "$(((ELAPSED_MS / 1000) % 60))" "$((ELAPSED_MS % 1000))"
 echo "Hashrate: ${HASHRATE} H/s"
 
 # show cursor

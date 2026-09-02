@@ -7,6 +7,7 @@ Inspired by [Тsфdiиg's 𝕏 post](https://x.com/tsoding/status/18557131132212
 ## Usage
 
 Requires `gcc`; `./hasher` builds the local C helper `hasher-helper` when needed.
+The helper uses all available CPU cores by default. Set `HASHER_THREADS` to cap it.
 
 By default the prefix searched for is at least three leading zeroes `000`
 
@@ -18,6 +19,10 @@ Giving a valid lowercase hex string as the first option searches for that prefix
 
 ```
 ./hasher bada55
+```
+
+```
+HASHER_THREADS=4 ./hasher 0000000
 ```
 
 ## Example
