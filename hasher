@@ -52,8 +52,7 @@ function generate_trailing_data() {
 function status_spinner() {
   # Setup for braille status indicator
   braille_chars=("⠇" "⠋" "⠙" "⠸" "⠴" "⠦")
-  fps=15
-  delay=$(echo "scale=6; 1.0 / $fps.0" | bc)
+  delay=0.066 # 15 fps
   i=0
   # Update status indicator
   while true; do
