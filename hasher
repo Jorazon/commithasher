@@ -17,7 +17,14 @@ trap "handle_int" SIGINT
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 HELPER_SOURCE="$SCRIPT_DIR/hasher-helper.c"
-HELPER_BINARY="$SCRIPT_DIR/hasher-helper"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    HELPER_BINARY="$SCRIPT_DIR/hasher-helper.exe"
+    ;;
+  *)
+    HELPER_BINARY="$SCRIPT_DIR/hasher-helper"
+    ;;
+esac
 
 TARGET="000" # The default target pattern (3 leading zeros)
 
