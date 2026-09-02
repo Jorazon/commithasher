@@ -10,6 +10,7 @@
 #endif
 
 #define NONCE_LEN 16
+#define PROGRESS_INTERVAL_ATTEMPTS 65536
 
 typedef struct {
   uint32_t h[5];
@@ -173,6 +174,20 @@ static void hash_to_hex(const unsigned char digest[20], char output[41]) {
   output[40] = '\0';
 }
 
+static void print_progress(uint64_t attempts, long long elapsed_ms) {
+  long long rate_ms = elapsed_ms;
+  if (rate_ms < 1) {
+    rate_ms = 1;
+  }
+
+  fprintf(stderr, "\rTested hashes: %llu | Duration: %lld.%03llds | Hashrate: %llu H/s",
+          (unsigned long long)attempts,
+          elapsed_ms / 1000,
+          elapsed_ms % 1000,
+          (unsigned long long)(attempts * 1000 / rate_ms));
+  fflush(stderr);
+}
+
 static unsigned char *read_stdin(size_t *size) {
   size_t capacity = 8192;
   size_t used = 0;
@@ -275,6 +290,8 @@ int main(int argc, char **argv) {
 
   uint64_t attempts = 0;
   long long start_ms = now_ms();
+  long long last_report_ms = start_ms;
+  int printed_progress = 0;
 
   for (uint64_t counter = 0;; counter++) {
     unsigned char digest[20];
@@ -289,9 +306,21 @@ int main(int argc, char **argv) {
 
     attempts++;
 
+    if ((attempts & (PROGRESS_INTERVAL_ATTEMPTS - 1)) == 0) {
+      long long current_ms = now_ms();
+      if (current_ms - last_report_ms >= 1000) {
+        print_progress(attempts, current_ms - start_ms);
+        last_report_ms = current_ms;
+        printed_progress = 1;
+      }
+    }
+
     if (hash_matches(digest, argv[1])) {
       char hash[41];
       long long elapsed_ms = now_ms() - start_ms;
+      if (printed_progress) {
+        fputc('\n', stderr);
+      }
       hash_to_hex(digest, hash);
       printf("%.*s %s %llu %lld\n", NONCE_LEN, nonce, hash,
              (unsigned long long)attempts, elapsed_ms);
