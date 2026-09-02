@@ -102,11 +102,14 @@ status_spinner &
 PID1=$!
 
 NONCE=""
+ATTEMPTS=0
+START_TIME_MS=$(date +%s%3N)
 
 while true; do
   # Generate nonce header value
   if NONCE=$(generate_nonce); then
     HASH=$(create_commit "$NONCE" 0)
+    ((ATTEMPTS++))
   else
     break
   fi
@@ -122,8 +125,18 @@ while true; do
     git reset --soft "$HASH"
 
     # Print info
+    ELAPSED_MS=$(($(date +%s%3N) - START_TIME_MS))
+    RATE_MS=$ELAPSED_MS
+    if [[ "$RATE_MS" -lt 1 ]]; then
+      RATE_MS=1
+    fi
+    HASHRATE=$((ATTEMPTS * 1000 / RATE_MS))
+
     echo "Found matching hash: $HASH"
     echo "Amended commit with header $NONCE"
+    #echo "Tested hashes: $ATTEMPTS"
+    #printf 'Duration: %d.%03ds\n' "$((ELAPSED_MS / 1000))" "$((ELAPSED_MS % 1000))"
+    echo "Hashrate: ${HASHRATE} H/s"
     break
   fi
 done
