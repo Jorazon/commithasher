@@ -18,6 +18,14 @@ Giving a valid lowercase hex string as the first option searches for that prefix
 ./hasher bada55
 ```
 
+## Example
+
+Updating hashes of every unpushed local commit
+
+```
+git rebase --exec './hasher 000' origin/master
+```
+
 ## TODO
 
 - [x] arg to give desired prefix instead of just current hard coded `000`
