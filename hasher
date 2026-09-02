@@ -25,28 +25,42 @@ elif [[ -n "$1" ]]; then
   exit 1
 fi
 
-# Retrieve the original message, timestamps and tree object from the HEAD commit
-MESSAGE=$(git log -1 --pretty=format:"%s")
-AUTHOR_DATE=$(git log -1 --format=%aI)
-COMMITTER_DATE=$(git log -1 --format=%cI)
-TREE=$(git write-tree)
+# Retrieve the original message, identities and tree object from the HEAD commit
+if ! MESSAGE=$(git log -1 --format=%B) ||
+   ! AUTHOR_IDENTITY=$(git log -1 --format="%an <%ae> %ad" --date=raw) ||
+   ! COMMITTER_IDENTITY=$(git log -1 --format="%cn <%ce> %cd" --date=raw) ||
+   ! TREE=$(git write-tree) ||
+   ! PARENT=$(git rev-parse --verify HEAD~1); then
+  echo "Error: failed to read commit metadata. Is HEAD a non-root commit?" >&2
+  exit 1
+fi
 
-# ASCII characters set: 0-9, A-F
-#CHARS=({0..9} {A..F})
+# ASCII characters set: 0-9, a-f
+CHARS=({0..9} {a..f})
 
-# invisible unicode characters
-CHARS=('2000' '2001' '2002' '2003' '2004' '2005' '2006' '2007' \
-'2008' '2009' '200A' '200B' '200C' '200D' '200E' '200F' '202F')
-
-# Function to generate random trailing data
-function generate_trailing_data() {
-  TRAILING=""
-  for i in {1..8}; do  # Length of trailing data, adjust as needed
+# Function to generate random nonce data for the custom commit header
+function generate_nonce() {
+  NONCE=""
+  for i in {1..16}; do  # Length of nonce data, adjust as needed
     INDEX=$(( RANDOM % ${#CHARS[@]} ))
-    TRAILING="${TRAILING}$(printf "\u${CHARS[$INDEX]}")"
+    NONCE="${NONCE}${CHARS[$INDEX]}"
   done
-  echo "$TRAILING"
+  echo "$NONCE"
   return 0
+}
+
+function create_commit() {
+  local nonce="$1"
+
+  {
+    printf 'tree %s\n' "$TREE"
+    printf 'parent %s\n' "$PARENT"
+    printf 'author %s\n' "$AUTHOR_IDENTITY"
+    printf 'committer %s\n' "$COMMITTER_IDENTITY"
+    printf 'nonce %s\n' "$nonce"
+    printf '\n'
+    printf '%s' "$MESSAGE"
+  } | git hash-object -t commit -w --stdin
 }
 
 function status_spinner() {
@@ -71,20 +85,15 @@ echo -ne "  Finding a cool hash\r"
 status_spinner &
 PID1=$!
 
-NEW_MESSAGE=""
+NONCE=""
 
 while true; do
-  # Generate trailing characters
-  if TRAILING_DATA=$(generate_trailing_data); then
-    # New commit message
-    NEW_MESSAGE="$MESSAGE $TRAILING_DATA"
+  # Generate nonce header value
+  if NONCE=$(generate_nonce); then
+    HASH=$(create_commit "$NONCE")
   else
     break
   fi
-
-  # Create a new commit with `git commit-tree`
-  HASH=$(GIT_AUTHOR_DATE="$AUTHOR_DATE" GIT_COMMITTER_DATE="$COMMITTER_DATE" \
-    git commit-tree "$TREE" -p HEAD~1 -m "$NEW_MESSAGE")
 
   # Check if the hash matches the required pattern
   if [[ "$HASH" == $TARGET* ]]; then
@@ -96,7 +105,7 @@ while true; do
 
     # Print info
     echo "Found matching hash: $HASH"
-    #echo "Amending commit with #$TRAILING_DATA"
+    echo "Amended commit with header $NONCE"
     break
   fi
 done
