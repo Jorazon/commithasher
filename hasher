@@ -45,17 +45,20 @@ done
 if ! MESSAGE=$(git log -1 --format=%B) ||
    ! AUTHOR_IDENTITY=$(git log -1 --format="%an <%ae> %ad" --date=raw) ||
    ! COMMITTER_IDENTITY=$(git log -1 --format="%cn <%ce> %cd" --date=raw) ||
-   ! TREE=$(git write-tree) ||
-   ! PARENT=$(git rev-parse --verify HEAD~1); then
-  echo "Error: failed to read commit metadata. Is HEAD a non-root commit?" >&2
+   ! TREE=$(git write-tree); then
+  echo "Error: failed to read commit metadata." >&2
   exit 1
 fi
+
+PARENT=$(git rev-parse --verify HEAD~1 2>/dev/null || true)
 
 function print_commit() {
   local nonce="$1"
 
   printf 'tree %s\n' "$TREE"
-  printf 'parent %s\n' "$PARENT"
+  if [[ -n "$PARENT" ]]; then
+    printf 'parent %s\n' "$PARENT"
+  fi
   printf 'author %s\n' "$AUTHOR_IDENTITY"
   printf 'committer %s\n' "$COMMITTER_IDENTITY"
   printf 'nonce %s\n' "$nonce"
