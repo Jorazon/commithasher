@@ -11,17 +11,17 @@ The helper uses all available CPU cores by default. Set `HASHER_THREADS` to cap 
 
 By default the prefix searched for is at least three leading zeroes `000`
 
-```
+```sh
 ./hasher
 ```
 
 Giving a valid lowercase hex string as the first option searches for that prefix
 
-```
+```sh
 ./hasher bada55
 ```
 
-```
+```sh
 HASHER_THREADS=4 ./hasher 0000000
 ```
 
@@ -29,7 +29,7 @@ HASHER_THREADS=4 ./hasher 0000000
 
 Updating hashes of every unpushed local commit
 
-```
+```sh
 git rebase --exec './hasher 000' origin/master
 ```
 
