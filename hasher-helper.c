@@ -12,7 +12,6 @@
 #include <windows.h>
 #else
 #include <pthread.h>
-#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 #endif
@@ -206,17 +205,79 @@ static void hash_to_hex(const unsigned char digest[20], char output[41]) {
   output[40] = '\0';
 }
 
+static void format_count(char *buffer, size_t size, uint64_t value) {
+  static const char suffixes[] = "kMGT";
+  double scaled = (double)value;
+  size_t suffix = 0;
+
+  while (scaled >= 1000.0 && suffix < sizeof(suffixes)) {
+    scaled /= 1000.0;
+    suffix++;
+  }
+
+  if (suffix == 0) {
+    snprintf(buffer, size, "%llu ", (unsigned long long)value);
+  } else if (scaled >= 100.0) {
+    snprintf(buffer, size, "%.0f %c", scaled, suffixes[suffix - 1]);
+  } else if (scaled >= 10.0) {
+    snprintf(buffer, size, "%.1f %c", scaled, suffixes[suffix - 1]);
+  } else {
+    snprintf(buffer, size, "%.2f %c", scaled, suffixes[suffix - 1]);
+  }
+}
+
+static void format_duration(char *buffer, size_t size, long long elapsed_ms) {
+  static const struct {
+    long long seconds;
+    char suffix;
+  } units[] = {
+    {24 * 60 * 60, 'd'},
+    {60 * 60, 'h'},
+    {60, 'm'},
+    {1, 's'},
+  };
+  long long remaining = elapsed_ms > 0 ? elapsed_ms / 1000 : 0;
+  size_t used = 0;
+  int started = 0;
+
+  buffer[0] = '\0';
+  for (size_t i = 0; i < sizeof(units) / sizeof(units[0]); i++) {
+    long long value = remaining / units[i].seconds;
+    remaining %= units[i].seconds;
+    if (!started && value == 0) {
+      continue;
+    }
+    started = 1;
+
+    int written = snprintf(buffer + used, size - used, "%lld%c", value, units[i].suffix);
+    if (written < 0 || (size_t)written >= size - used) {
+      buffer[size - 1] = '\0';
+      return;
+    }
+    used += (size_t)written;
+  }
+
+  if (used == 0) {
+    snprintf(buffer, size, "0s");
+  }
+}
+
 static void print_progress(uint64_t attempts, long long elapsed_ms) {
   long long rate_ms = elapsed_ms;
+  char attempts_text[32];
+  char duration_text[64];
+  char rate_text[32];
+
   if (rate_ms < 1) {
     rate_ms = 1;
   }
 
-  fprintf(stderr, "\rTested hashes: %llu | Duration: %lldm%llds | Hashrate: %llu H/s",
-          (unsigned long long)attempts,
-          elapsed_ms / (1000 * 60),
-          (elapsed_ms / 1000) % 60,
-          (unsigned long long)(attempts * 1000 / rate_ms));
+  format_count(attempts_text, sizeof(attempts_text), attempts);
+  format_duration(duration_text, sizeof(duration_text), elapsed_ms);
+  format_count(rate_text, sizeof(rate_text), attempts * 1000 / rate_ms);
+
+  fprintf(stderr, "\r\033[2KTested: %sH | Runtime: %s | Hashrate: %sH/s",
+          attempts_text, duration_text, rate_text);
   fflush(stderr);
 }
 
