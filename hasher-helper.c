@@ -286,9 +286,9 @@ static long long now_ms(void) {
 #ifdef _WIN32
   return (long long)GetTickCount64();
 #else
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  return (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 #endif
 }
 
